@@ -1,4 +1,6 @@
 const STORAGE_KEY = "duari-memory-book-v1";
+const PHOTO_MAX_SIZE = 1280;
+const PHOTO_JPEG_QUALITY = 0.78;
 const app = document.querySelector("#app");
 const templates = window.DUARI_TEMPLATE_CATALOG || [];
 const memoryTypeOptions = ["Date", "Travel", "Letter", "Conflict & Repair", "Special Day", "Daily Review"];
@@ -119,14 +121,25 @@ function loadState() {
   }
 }
 
-function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+function saveState(nextState = state) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+    return true;
+  } catch (error) {
+    if (isQuotaExceeded(error)) return false;
+    throw error;
+  }
 }
 
 function setState(patch) {
-  state = { ...state, ...patch };
-  saveState();
+  const nextState = { ...state, ...patch };
+  if (!saveState(nextState)) {
+    showStorageError();
+    return false;
+  }
+  state = nextState;
   render();
+  return true;
 }
 
 function currentUser() {
@@ -169,6 +182,7 @@ function render() {
     form: renderMemoryForm,
     anniversaryForm: renderAnniversaryForm,
     detail: renderMemoryDetail,
+    gallery: renderMemoryGallery,
     settingsPage: renderSettingsPage
   };
 
@@ -651,7 +665,7 @@ function bindMemories() {
 
 function bindMemoryCards() {
   app.querySelectorAll("[data-memory]").forEach((button) => {
-    button.addEventListener("click", () => setState({ route: "detail", selectedMemoryId: button.dataset.memory }));
+    button.addEventListener("click", () => setState({ route: "detail", selectedMemoryId: button.dataset.memory, detailPhotoIndex: 0 }));
   });
 }
 
@@ -734,7 +748,7 @@ function renderMemoryForm() {
         </section>
         <p class="error-text" id="memoryError"></p>
         <div class="sticky-actions">
-          <button class="button-primary">${editing ? "Save Changes" : "Save"}</button>
+          <button class="button-primary" type="submit" form="memoryForm" data-action="save-memory">${editing ? "Save Changes" : "Save"}</button>
           ${editing ? `<button class="danger-button" type="button" data-action="delete">Delete this memory?</button>` : ""}
         </div>
       </form>
@@ -752,6 +766,21 @@ function renderMemoryForm() {
           </div>
         </div>
       </div>
+      ${editing ? `
+        <div class="modal-backdrop delete-modal" id="deleteMemoryModal" hidden>
+          <div class="delete-dialog" role="dialog" aria-modal="true" aria-labelledby="deleteMemoryTitle">
+            <div class="delete-dialog-header">
+              <h2 id="deleteMemoryTitle">Delete this memory?</h2>
+              <button class="routine-dialog-close" type="button" data-action="close-delete-modal" aria-label="Close">x</button>
+            </div>
+            <p class="body-copy">This memory will be removed from your book.</p>
+            <div class="delete-dialog-actions">
+              <button class="button-ghost" type="button" data-action="close-delete-modal">Cancel</button>
+              <button class="danger-button" type="button" data-action="confirm-delete">Delete</button>
+            </div>
+          </div>
+        </div>
+      ` : ""}
     </main>
   `;
   let photos = [...(memory.photos || [])];
@@ -790,6 +819,7 @@ function renderMemoryForm() {
   const routineModal = app.querySelector("#routineModal");
   const routineNameInput = app.querySelector("#routineNameInput");
   const routineModalError = app.querySelector("#routineModalError");
+  const deleteMemoryModal = app.querySelector("#deleteMemoryModal");
   const openRoutineModal = () => {
     routineModal.hidden = false;
     routineNameInput.value = "";
@@ -798,6 +828,14 @@ function renderMemoryForm() {
   };
   const closeRoutineModal = () => {
     routineModal.hidden = true;
+  };
+  const openDeleteModal = () => {
+    if (!deleteMemoryModal) return;
+    deleteMemoryModal.hidden = false;
+    deleteMemoryModal.querySelector("[data-action='confirm-delete']")?.focus();
+  };
+  const closeDeleteModal = () => {
+    if (deleteMemoryModal) deleteMemoryModal.hidden = true;
   };
   const saveRoutineFromModal = () => {
     const cleanLabel = routineNameInput.value.trim();
@@ -814,9 +852,11 @@ function renderMemoryForm() {
     closeRoutineModal();
   };
   app.querySelector("[data-action='back']").addEventListener("click", () => setState({ route: null }));
-  app.querySelector("[data-action='delete']")?.addEventListener("click", () => {
-    if (confirm("Delete this memory?")) setState({ memories: state.memories.filter((item) => item.id !== editing.id), route: null });
+  app.querySelector("[data-action='delete']")?.addEventListener("click", openDeleteModal);
+  app.querySelector("[data-action='confirm-delete']")?.addEventListener("click", () => {
+    setState({ memories: state.memories.filter((item) => item.id !== editing.id), route: null });
   });
+  app.querySelectorAll("[data-action='close-delete-modal']").forEach((button) => button.addEventListener("click", closeDeleteModal));
   app.querySelector("[data-action='add-routine']").addEventListener("click", openRoutineModal);
   app.querySelectorAll("[data-action='close-routine-modal']").forEach((button) => button.addEventListener("click", closeRoutineModal));
   app.querySelector("[data-action='save-routine']").addEventListener("click", saveRoutineFromModal);
@@ -824,8 +864,14 @@ function renderMemoryForm() {
     if (event.key === "Enter") saveRoutineFromModal();
     if (event.key === "Escape") closeRoutineModal();
   });
+  deleteMemoryModal?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeDeleteModal();
+  });
   routineModal.addEventListener("click", (event) => {
     if (event.target === routineModal) closeRoutineModal();
+  });
+  deleteMemoryModal?.addEventListener("click", (event) => {
+    if (event.target === deleteMemoryModal) closeDeleteModal();
   });
   app.querySelector("#routineList").addEventListener("click", (event) => {
     const removeButton = event.target.closest("[data-routine-remove]");
@@ -841,35 +887,51 @@ function renderMemoryForm() {
   });
   app.querySelector("[data-photo-input]").addEventListener("change", async (event) => {
     const files = [...event.target.files].slice(0, 6);
-    const loaded = await Promise.all(files.map(fileToDataUrl));
+    const loaded = await Promise.all(files.map(async (file) => compressPhotoDataUrl(await fileToDataUrl(file))));
     photos = [...photos, ...loaded].slice(0, 6);
     renderPhotoPreview();
     event.target.value = "";
   });
-  app.querySelector("#memoryForm").addEventListener("submit", (event) => {
+  app.querySelector("#memoryForm").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const values = Object.fromEntries(new FormData(event.currentTarget));
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const values = Object.fromEntries(formData);
+    const selectedCustomRoutines = formData.getAll("customRoutine").map((item) => item.trim()).filter(Boolean);
     if (!values.title.trim()) {
       app.querySelector("#memoryError").textContent = "Title can't be empty.";
       return;
     }
-    const payload = {
-      id: editing?.id || uid(),
-      date: values.date,
-      title: values.title.trim(),
-      type: values.type,
-      feeling: values.feeling,
-      place: values.place.trim(),
-      note: values.note.trim(),
-      photos,
-      together: { workout: Boolean(values.workout), reading: Boolean(values.reading), customRoutines: [...new FormData(event.currentTarget).getAll("customRoutine")].map((item) => item.trim()).filter(Boolean) },
-      plan: { goal: values.goal.trim(), plan: values.plan.trim() },
-      authorUserId: editing?.authorUserId || currentUser().id,
-      createdAt: editing?.createdAt || Date.now(),
-      updatedAt: Date.now()
-    };
-    const memories = editing ? state.memories.map((item) => item.id === editing.id ? payload : item) : [payload, ...state.memories];
-    setState({ memories, selectedDate: payload.date, visibleMonth: payload.date.slice(0, 7), route: "detail", selectedMemoryId: payload.id });
+    const saveButton = app.querySelector("[data-action='save-memory']");
+    saveButton.disabled = true;
+    saveButton.textContent = "Saving...";
+    try {
+      const compressedPhotos = await Promise.all(photos.map(compressPhotoDataUrl));
+      const payload = {
+        id: editing?.id || uid(),
+        date: values.date,
+        title: values.title.trim(),
+        type: values.type,
+        feeling: values.feeling,
+        place: values.place.trim(),
+        note: values.note.trim(),
+        photos: compressedPhotos,
+        together: { workout: Boolean(values.workout), reading: Boolean(values.reading), customRoutines: selectedCustomRoutines },
+        plan: { goal: values.goal.trim(), plan: values.plan.trim() },
+        authorUserId: editing?.authorUserId || currentUser().id,
+        createdAt: editing?.createdAt || Date.now(),
+        updatedAt: Date.now()
+      };
+      const memories = editing ? state.memories.map((item) => item.id === editing.id ? payload : item) : [payload, ...state.memories];
+      const compactMemories = await compressMemoriesPhotos(memories);
+      const saved = setState({ memories: compactMemories, selectedDate: payload.date, visibleMonth: payload.date.slice(0, 7), route: "detail", selectedMemoryId: payload.id, detailPhotoIndex: 0 });
+      if (saved) return;
+    } catch {
+      app.querySelector("#memoryError").textContent = "Could not save this memory. Please try again.";
+    } finally {
+      saveButton.disabled = false;
+      saveButton.textContent = editing ? "Save Changes" : "Save";
+    }
   });
 }
 
@@ -896,19 +958,69 @@ function fileToDataUrl(file) {
   });
 }
 
+function compressPhotoDataUrl(src) {
+  if (!src?.startsWith("data:image/")) return Promise.resolve(src);
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const scale = Math.min(1, PHOTO_MAX_SIZE / Math.max(image.naturalWidth, image.naturalHeight));
+        if (scale >= 1 && src.startsWith("data:image/jpeg") && src.length < 700000) return resolve(src);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        const context = canvas.getContext("2d");
+        context.fillStyle = "#fffefa";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", PHOTO_JPEG_QUALITY));
+      } catch {
+        resolve(src);
+      }
+    };
+    image.onerror = () => resolve(src);
+    image.src = src;
+  });
+}
+
+async function compressMemoriesPhotos(memories) {
+  return Promise.all(memories.map(async (memory) => ({
+    ...memory,
+    photos: await Promise.all((memory.photos || []).map(compressPhotoDataUrl))
+  })));
+}
+
+function isQuotaExceeded(error) {
+  return error?.name === "QuotaExceededError" || error?.name === "NS_ERROR_DOM_QUOTA_REACHED" || error?.code === 22 || error?.code === 1014;
+}
+
+function showStorageError() {
+  const errorTarget = app.querySelector("#memoryError");
+  const message = "Storage is full. Please remove a few photos or re-add them so DUARI can save smaller copies.";
+  if (errorTarget) {
+    errorTarget.textContent = message;
+    errorTarget.scrollIntoView({ block: "center", behavior: "smooth" });
+  } else {
+    alert(message);
+  }
+}
+
 function renderMemoryDetail() {
   const memory = state.memories.find((item) => item.id === state.selectedMemoryId);
   if (!memory) return setState({ route: null });
   const author = [state.couple.a, state.couple.b].find((p) => p.id === memory.authorUserId);
   const canEdit = memory.authorUserId === currentUser().id;
-  const dailyTogetherRows = dailyTogetherDetailRows(memory.date);
+  const dailyTogetherRows = dailyTogetherDetailRows(memory);
+  const photos = memory.photos || [];
+  const photoIndex = Math.min(Math.max(state.detailPhotoIndex || 0, 0), Math.max(photos.length - 1, 0));
   app.innerHTML = `
     <main class="app-screen">
       <header class="screen-header">
         <button class="icon-button" data-action="back">${icon("back")}</button>
-        <div class="header-stack"><p class="eyebrow">Memory Detail</p></div>
+        <div class="header-stack"><h1 class="screen-title">${escapeHtml(memory.title)}</h1></div>
         <span></span>
       </header>
+      ${photos.length ? detailPhotoCarouselHtml(memory, photos, photoIndex) : ""}
       <section class="widget-card form-panel section detail-review-card">
         <h1 class="screen-title">${escapeHtml(memory.title)}</h1>
         <div class="filter-strip">
@@ -919,30 +1031,99 @@ function renderMemoryDetail() {
         <p class="small-copy">${fmt(memory.date, { month: "long", day: "numeric", year: "numeric" })}${memory.place ? ` · ${escapeHtml(memory.place)}` : ""}</p>
         <p class="body-copy">${escapeHtml(memory.note || "No note yet.")}</p>
       </section>
-      ${memory.photos?.length ? `<section class="section">${memory.photos.map((src) => `<img class="detail-photo" src="${src}" alt="" />`).join("")}</section>` : ""}
       <section class="widget-card form-panel section detail-routine-card">
-        <h2>Routine</h2>
-        <div class="daily-together-list">${dailyTogetherRows}</div>
         <h2>Daily Plan</h2>
         <div class="daily-plan-detail">
           <p class="small-copy"><strong>Goal:</strong> ${escapeHtml(memory.plan?.goal || "No goal today.")}</p>
           <p class="small-copy">${escapeHtml(memory.plan?.plan || "No plan today.")}</p>
         </div>
+        <h2>Routine</h2>
+        <div class="daily-together-list">${dailyTogetherRows}</div>
       </section>
       ${canEdit ? `<button class="button-secondary detail-edit-button" data-action="edit">Edit Memory</button>` : ""}
     </main>
   `;
   app.querySelector("[data-action='back']").addEventListener("click", () => setState({ route: null }));
   app.querySelector("[data-action='edit']")?.addEventListener("click", () => setState({ route: "form", editingMemoryId: memory.id }));
+  bindDetailPhotoCarousel(photos.length, photoIndex);
 }
 
-function dailyTogetherDetailRows(date) {
-  const people = [state.couple.a, state.couple.b];
-  const memoryItems = memoriesForDate(date);
-  const latestByAuthor = Object.fromEntries(
-    people.map((person) => [person.id, memoryItems.find((item) => item.authorUserId === person.id)])
-  );
-  const customRoutineLabels = [...new Set(memoryItems.flatMap((item) => item.together?.customRoutines || []))];
+function detailPhotoCarouselHtml(memory, photos, photoIndex) {
+  return `
+    <section class="detail-photo-card section" aria-label="Memory photos">
+      <div class="detail-photo-frame">
+        <button class="detail-cover-button" data-action="open-gallery" aria-label="Open photo gallery">
+          <img class="detail-cover-photo" src="${photos[photoIndex]}" alt="${escapeAttr(memory.title)} cover photo" />
+        </button>
+        ${photos.length > 1 ? `
+          <span class="photo-count">${photoIndex + 1} / ${photos.length}</span>
+          <button class="photo-nav-button photo-nav-button--prev" data-photo-step="-1" aria-label="Previous photo">&lt;</button>
+          <button class="photo-nav-button photo-nav-button--next" data-photo-step="1" aria-label="Next photo">&gt;</button>
+        ` : ""}
+      </div>
+    </section>
+  `;
+}
+
+function bindDetailPhotoCarousel(photoCount, photoIndex) {
+  if (!photoCount) return;
+  const movePhoto = (step) => {
+    const nextIndex = (photoIndex + step + photoCount) % photoCount;
+    setState({ detailPhotoIndex: nextIndex });
+  };
+  let didDragPhoto = false;
+  app.querySelector("[data-action='open-gallery']")?.addEventListener("click", () => {
+    if (didDragPhoto) {
+      didDragPhoto = false;
+      return;
+    }
+    setState({ route: "gallery" });
+  });
+  app.querySelectorAll("[data-photo-step]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      movePhoto(Number(button.dataset.photoStep));
+    });
+  });
+  const coverButton = app.querySelector(".detail-cover-button");
+  let dragStartX = null;
+  coverButton?.addEventListener("pointerdown", (event) => {
+    dragStartX = event.clientX;
+    coverButton.setPointerCapture?.(event.pointerId);
+  });
+  coverButton?.addEventListener("pointerup", (event) => {
+    if (dragStartX === null) return;
+    const delta = event.clientX - dragStartX;
+    dragStartX = null;
+    didDragPhoto = Math.abs(delta) > 42;
+    if (didDragPhoto) movePhoto(delta < 0 ? 1 : -1);
+  });
+  coverButton?.addEventListener("pointercancel", () => {
+    dragStartX = null;
+  });
+}
+
+function renderMemoryGallery() {
+  const memory = state.memories.find((item) => item.id === state.selectedMemoryId);
+  if (!memory) return setState({ route: null });
+  const photos = memory.photos || [];
+  app.innerHTML = `
+    <main class="app-screen gallery-screen">
+      <header class="gallery-header">
+        <button class="gallery-close" data-action="back" aria-label="Close gallery">X</button>
+        <h1 class="gallery-title">${escapeHtml(memory.title)}</h1>
+        <span></span>
+      </header>
+      <section class="gallery-photo-list">
+        ${photos.length ? photos.map((src, index) => `<img class="gallery-photo" src="${src}" alt="${escapeAttr(memory.title)} photo ${index + 1}" />`).join("") : `<p class="body-copy">No photos yet.</p>`}
+      </section>
+    </main>
+  `;
+  app.querySelector("[data-action='back']").addEventListener("click", () => setState({ route: "detail" }));
+}
+
+function dailyTogetherDetailRows(memory) {
+  const customRoutineLabels = memory.together?.customRoutines || [];
   const rows = [
     { key: "workout", label: "Workout" },
     { key: "reading", label: "Reading" },
@@ -952,12 +1133,7 @@ function dailyTogetherDetailRows(date) {
   return rows.map((row) => `
     <div class="daily-together-row">
       <span class="daily-together-label">${row.label}</span>
-      ${people.map((person) => {
-        const checked = row.custom
-          ? latestByAuthor[person.id]?.together?.customRoutines?.includes(row.key)
-          : latestByAuthor[person.id]?.together?.[row.key];
-        return `<span class="daily-person-status"><span>${escapeHtml(person.nickname.toLowerCase())}</span> <strong>${checked ? "✓" : "-"}</strong></span>`;
-      }).join("")}
+      <span class="daily-person-status"><strong>${row.custom || memory.together?.[row.key] ? "✓" : "-"}</strong></span>
     </div>
   `).join("");
 }
