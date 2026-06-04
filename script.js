@@ -183,6 +183,7 @@ function render() {
     anniversaryForm: renderAnniversaryForm,
     detail: renderMemoryDetail,
     gallery: renderMemoryGallery,
+    matchReading: renderMatchReading,
     settingsPage: renderSettingsPage
   };
 
@@ -381,9 +382,10 @@ function renderWho() {
 }
 
 function renderMain() {
+  const showSummary = ["memories", "settings"].includes(state.activeTab);
   app.innerHTML = `
     <main class="app-screen">
-      ${summaryHtml()}
+      ${showSummary ? summaryHtml() : ""}
       ${tabContent()}
     </main>
     ${bottomNavHtml()}
@@ -1017,7 +1019,7 @@ function renderMemoryDetail() {
     <main class="app-screen">
       <header class="screen-header">
         <button class="icon-button" data-action="back">${icon("back")}</button>
-        <div class="header-stack"><h1 class="screen-title">${escapeHtml(memory.title)}</h1></div>
+        <div class="header-stack"><h1 class="screen-title">Memory Detail</h1></div>
         <span></span>
       </header>
       ${photos.length ? detailPhotoCarouselHtml(memory, photos, photoIndex) : ""}
@@ -1218,39 +1220,109 @@ function bindTemplates() {
 }
 
 function matchHtml() {
-  const report = state.matchReport;
+  const reports = matchReports();
   return `
     <section class="section">
       <div class="section-heading"><h2>Saju Compatibility</h2></div>
       <form class="widget-card form-panel form-grid" id="matchForm">
+        ${field(`${state.couple.a.nickname}'s real name`, "aRealName", state.couple.a.nickname)}
+        ${selectField(`${state.couple.a.nickname}'s gender`, "aGender", ["Female", "Male", "Other", "Prefer not to say"], "Prefer not to say")}
         ${field(`${state.couple.a.nickname}'s birthday`, "aBirthday", state.couple.a.birthday, "date")}
+        ${field(`${state.couple.a.nickname}'s birth time`, "aBirthTime", "", "time", "data-birth-time='a'")}
+        <div class="checkbox-row"><input type="checkbox" name="aUnknownTime" data-unknown-time="a" /><span>I don't know the birth time</span></div>
+        ${field(`${state.couple.b.nickname}'s real name`, "bRealName", state.couple.b.nickname)}
+        ${selectField(`${state.couple.b.nickname}'s gender`, "bGender", ["Female", "Male", "Other", "Prefer not to say"], "Prefer not to say")}
         ${field(`${state.couple.b.nickname}'s birthday`, "bBirthday", state.couple.b.birthday, "date")}
-        ${selectField("Relationship status", "status", ["Dating", "Long-term relationship", "Long-distance", "Living together", "Engaged", "Married", "Complicated"], "Dating")}
-        <label class="checkbox-row"><input type="checkbox" name="unknownTime" checked /> I don't know the birth time</label>
+        ${field(`${state.couple.b.nickname}'s birth time`, "bBirthTime", "", "time", "data-birth-time='b'")}
+        <div class="checkbox-row"><input type="checkbox" name="bUnknownTime" data-unknown-time="b" /><span>I don't know the birth time</span></div>
         <button class="button-primary">View Full Reading</button>
       </form>
-      ${report ? reportHtml(report) : ""}
+      ${reports.length ? matchHistoryHtml(reports) : ""}
     </section>
   `;
 }
 
 function bindMatch() {
+  app.querySelectorAll("[data-unknown-time]").forEach((checkbox) => {
+    const timeInput = app.querySelector(`[data-birth-time='${checkbox.dataset.unknownTime}']`);
+    const syncBirthTimeInput = () => {
+      if (!timeInput) return;
+      timeInput.disabled = checkbox.checked;
+      if (checkbox.checked) timeInput.value = "";
+    };
+    syncBirthTimeInput();
+    checkbox.addEventListener("change", syncBirthTimeInput);
+  });
   app.querySelector("#matchForm")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.currentTarget));
     const seed = [...values.aBirthday, ...values.bBirthday].reduce((sum, char) => sum + char.charCodeAt(0), 0);
     const score = 68 + (seed % 24);
+    const report = {
+      id: uid(),
+      score,
+      createdAt: Date.now(),
+      aName: values.aRealName.trim() || state.couple.a.nickname,
+      bName: values.bRealName.trim() || state.couple.b.nickname,
+      aGender: values.aGender,
+      bGender: values.bGender,
+      summary: "Your rhythm feels gentle and steady. One person brings warmth to small routines, while the other helps turn feelings into clear plans.",
+      natural: "Planning ordinary days together, comforting each other after busy weeks, and keeping promises in small visible ways.",
+      care: "Avoid assuming silence means agreement. A short check-in keeps both hearts on the same page.",
+      prompt: "What is one tiny ritual we want to protect this month?"
+    };
     setState({
-      matchReport: {
-        score,
-        status: values.status,
-        summary: "Your rhythm feels gentle and steady. One person brings warmth to small routines, while the other helps turn feelings into clear plans.",
-        natural: "Planning ordinary days together, comforting each other after busy weeks, and keeping promises in small visible ways.",
-        care: "Avoid assuming silence means agreement. A short check-in keeps both hearts on the same page.",
-        prompt: "What is one tiny ritual we want to protect this month?"
-      }
+      matchReport: report,
+      matchReports: [report, ...matchReports()].slice(0, 12),
+      selectedMatchReportId: report.id,
+      route: "matchReading"
     });
   });
+  app.querySelectorAll("[data-match-report]").forEach((button) => {
+    button.addEventListener("click", () => setState({ route: "matchReading", selectedMatchReportId: button.dataset.matchReport }));
+  });
+}
+
+function matchReports() {
+  const reports = state.matchReports || [];
+  if (reports.length) return reports;
+  return state.matchReport ? [{ ...state.matchReport, id: state.matchReport.id || "latest", createdAt: state.matchReport.createdAt || Date.now() }] : [];
+}
+
+function matchHistoryHtml(reports) {
+  return `
+    <section class="section">
+      <div class="section-heading"><h2>Reading History</h2></div>
+      <div class="settings-list">
+        ${reports.map((report) => `
+          <button class="settings-row" data-match-report="${report.id}">
+            <div>
+              <strong>${report.score}% Overall Match</strong>
+              <span>${fmt(localISO(new Date(report.createdAt || Date.now())), { month: "long", day: "numeric", year: "numeric" })} - ${escapeHtml(report.aName || state.couple.a.nickname)} & ${escapeHtml(report.bName || state.couple.b.nickname)}</span>
+            </div>
+            <span>&gt;</span>
+          </button>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderMatchReading() {
+  const reports = matchReports();
+  const report = reports.find((item) => item.id === state.selectedMatchReportId) || reports[0];
+  if (!report) return setState({ route: null, activeTab: "match" });
+  app.innerHTML = `
+    <main class="app-screen">
+      <header class="screen-header">
+        <button class="icon-button" data-action="back">${icon("back")}</button>
+        <div class="header-stack"><h1 class="screen-title">Compatibility Reading</h1></div>
+        <span></span>
+      </header>
+      ${reportHtml(report)}
+    </main>
+  `;
+  app.querySelector("[data-action='back']").addEventListener("click", () => setState({ route: null, activeTab: "match" }));
 }
 
 function reportHtml(report) {
@@ -1394,8 +1466,8 @@ function bindBottomNav() {
 function bottomNavHtml() {
   const tabs = [
     ["memories", "Memories"],
-    ["templates", "Templates"],
     ["match", "Match"],
+    ["templates", "Templates"],
     ["settings", "Settings"]
   ];
   return `

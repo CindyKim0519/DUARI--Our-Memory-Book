@@ -299,6 +299,19 @@ textarea.paper-input {
   font-weight: 800;
 }
 
+.checkbox-row input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+.checkbox-row span {
+  pointer-events: none;
+}
+
 .routine-form-card {
   align-items: stretch;
 }
