@@ -543,8 +543,74 @@ textarea.paper-input {
   line-height: 1;
 }
 
+.selected-card,
+.detail-review-card,
+.detail-routine-card {
+  gap: var(--space-4);
+}
+
 .selected-card {
   padding: var(--space-5);
+}
+
+.detail-review-card .screen-title {
+  font-size: var(--text-display-md, 30px);
+}
+
+.detail-routine-card h2 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--text-title-md);
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.daily-together-list,
+.daily-plan-detail {
+  display: grid;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.daily-together-row {
+  display: grid;
+  grid-template-columns: max-content max-content max-content;
+  column-gap: var(--space-5);
+  row-gap: var(--space-1);
+  align-items: center;
+  justify-content: start;
+  color: var(--color-text-muted);
+  font-size: var(--text-body-md);
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.daily-together-label {
+  min-width: 112px;
+  color: var(--color-text);
+}
+
+.daily-person-status {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.daily-person-status strong,
+.daily-plan-detail strong {
+  color: var(--color-sage-700);
+  font-weight: 900;
+}
+
+.daily-plan-detail .small-copy {
+  font-size: var(--text-body-md);
+}
+
+.detail-edit-button {
+  min-height: 48px;
 }
 
 .selected-day-panel {

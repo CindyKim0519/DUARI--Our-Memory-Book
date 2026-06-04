@@ -695,7 +695,7 @@ function renderMemoryForm() {
           <label class="field"><span>Note</span><textarea class="paper-input" name="note" placeholder="Write down the moment you want to remember today.">${escapeHtml(memory.note)}</textarea></label>
         </section>
         <section class="widget-card form-panel form-grid">
-          <span class="section-label">Daily Together</span>
+          <span class="section-label">Routine</span>
           ${checkField("Workout day", "workout", memory.together?.workout)}
           ${checkField("Reading day", "reading", memory.together?.reading)}
           ${checkField("Walk day", "walk", memory.together?.walk)}
@@ -704,12 +704,18 @@ function renderMemoryForm() {
           <label class="field"><span>My plan today</span><textarea class="paper-input" name="plan">${escapeHtml(memory.plan?.plan || "")}</textarea></label>
         </section>
         <p class="error-text" id="memoryError"></p>
-        <div class="sticky-actions"><button class="button-primary">${editing ? "Save Changes" : "Save"}</button></div>
+        <div class="sticky-actions">
+          <button class="button-primary">${editing ? "Save Changes" : "Save"}</button>
+          ${editing ? `<button class="danger-button" type="button" data-action="delete">Delete this memory?</button>` : ""}
+        </div>
       </form>
     </main>
   `;
   let photos = [...(memory.photos || [])];
   app.querySelector("[data-action='back']").addEventListener("click", () => setState({ route: null }));
+  app.querySelector("[data-action='delete']")?.addEventListener("click", () => {
+    if (confirm("Delete this memory?")) setState({ memories: state.memories.filter((item) => item.id !== editing.id), route: null });
+  });
   app.querySelector("[data-photo-input]").addEventListener("change", async (event) => {
     const files = [...event.target.files].slice(0, 6);
     const loaded = await Promise.all(files.map(fileToDataUrl));
@@ -771,14 +777,16 @@ function renderMemoryDetail() {
   if (!memory) return setState({ route: null });
   const author = [state.couple.a, state.couple.b].find((p) => p.id === memory.authorUserId);
   const canEdit = memory.authorUserId === currentUser().id;
+  const dailyTogetherRows = dailyTogetherDetailRows(memory.date);
   app.innerHTML = `
     <main class="app-screen">
       <header class="screen-header">
         <button class="icon-button" data-action="back">${icon("back")}</button>
-        <div class="header-stack"><p class="eyebrow">Memory Detail</p><h1 class="screen-title">${escapeHtml(memory.title)}</h1></div>
-        ${canEdit ? `<button class="icon-button" data-action="edit">✎</button>` : "<span></span>"}
+        <div class="header-stack"><p class="eyebrow">Memory Detail</p></div>
+        <span></span>
       </header>
-      <section class="widget-card form-panel section">
+      <section class="widget-card form-panel section detail-review-card">
+        <h1 class="screen-title">${escapeHtml(memory.title)}</h1>
         <div class="filter-strip">
           <span class="chip">${memory.type}</span>
           <span class="chip" data-tone="love">${memory.feeling}</span>
@@ -788,21 +796,42 @@ function renderMemoryDetail() {
         <p class="body-copy">${escapeHtml(memory.note || "No note yet.")}</p>
       </section>
       ${memory.photos?.length ? `<section class="section">${memory.photos.map((src) => `<img class="detail-photo" src="${src}" alt="" />`).join("")}</section>` : ""}
-      <section class="memory-card selected-card section">
-        <h2>Daily Together</h2>
-        <p class="small-copy">Workout day ${memory.together?.workout ? "✓" : "-"} · Reading day ${memory.together?.reading ? "✓" : "-"} · Walk day ${memory.together?.walk ? "✓" : "-"}</p>
+      <section class="widget-card form-panel section detail-routine-card">
+        <h2>Routine</h2>
+        <div class="daily-together-list">${dailyTogetherRows}</div>
         <h2>Daily Plan</h2>
-        <p class="small-copy">${escapeHtml(memory.plan?.goal || "No goal today.")}</p>
-        <p class="body-copy">${escapeHtml(memory.plan?.plan || "")}</p>
+        <div class="daily-plan-detail">
+          <p class="small-copy"><strong>Goal:</strong> ${escapeHtml(memory.plan?.goal || "No goal today.")}</p>
+          <p class="small-copy">${escapeHtml(memory.plan?.plan || "No plan today.")}</p>
+        </div>
       </section>
-      ${canEdit ? `<button class="danger-button" data-action="delete">Delete this memory?</button>` : ""}
+      ${canEdit ? `<button class="button-secondary detail-edit-button" data-action="edit">Edit Memory</button>` : ""}
     </main>
   `;
   app.querySelector("[data-action='back']").addEventListener("click", () => setState({ route: null }));
   app.querySelector("[data-action='edit']")?.addEventListener("click", () => setState({ route: "form", editingMemoryId: memory.id }));
-  app.querySelector("[data-action='delete']")?.addEventListener("click", () => {
-    if (confirm("Delete this memory?")) setState({ memories: state.memories.filter((item) => item.id !== memory.id), route: null });
-  });
+}
+
+function dailyTogetherDetailRows(date) {
+  const people = [state.couple.a, state.couple.b];
+  const memoryItems = memoriesForDate(date);
+  const latestByAuthor = Object.fromEntries(
+    people.map((person) => [person.id, memoryItems.find((item) => item.authorUserId === person.id)])
+  );
+  const rows = [
+    { key: "workout", label: "workout" },
+    { key: "reading", label: "reading" }
+  ];
+
+  return rows.map((row) => `
+    <div class="daily-together-row">
+      <span class="daily-together-label">${row.label}</span>
+      ${people.map((person) => {
+        const checked = latestByAuthor[person.id]?.together?.[row.key];
+        return `<span class="daily-person-status"><span>${escapeHtml(person.nickname.toLowerCase())}</span> <strong>${checked ? "✓" : "-"}</strong></span>`;
+      }).join("")}
+    </div>
+  `).join("");
 }
 
 function renderAnniversaryForm() {
