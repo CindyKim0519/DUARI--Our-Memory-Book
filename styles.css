@@ -402,6 +402,31 @@ textarea.paper-input {
   padding-bottom: 2px;
 }
 
+.collection-filters,
+.collection-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  align-items: end;
+}
+
+.collection-summary {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  margin-bottom: var(--space-3);
+}
+
+.collection-summary .small-copy {
+  margin: 0;
+}
+
+.collection-add-button {
+  min-height: 34px;
+  padding: 0 16px;
+  box-shadow: var(--shadow-pressed);
+  font-size: var(--text-body-sm);
+}
+
 .chip-button {
   min-height: 38px;
   flex: 0 0 auto;
@@ -681,6 +706,8 @@ textarea.paper-input {
 }
 
 .memory-main {
+  display: grid;
+  align-content: center;
   min-width: 0;
 }
 

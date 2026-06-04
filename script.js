@@ -348,7 +348,6 @@ function renderMain() {
       ${summaryHtml()}
       ${tabContent()}
     </main>
-    ${state.activeTab === "memories" && state.memoryView !== "calendar" ? `<button class="floating-add" data-action="add-memory" aria-label="Add Memory">${icon("add")}</button>` : ""}
     ${bottomNavHtml()}
   `;
   bindHeader();
@@ -528,6 +527,26 @@ function memoryListHtml(items) {
   return `<div class="memory-list">${items.map(memoryCardHtml).join("")}</div>`;
 }
 
+function collectionItems(query = state.searchQuery || "", author = state.authorFilter || "all", type = state.typeFilter || "all") {
+  return (state.memories || []).filter((memory) => {
+    const haystack = [memory.title, memory.place, memory.note, memory.feeling, memory.type].join(" ").toLowerCase();
+    const matchesQuery = haystack.includes(query.toLowerCase());
+    const matchesAuthor = author === "all" || memory.authorUserId === author;
+    const matchesType = type === "all" || memory.type === type;
+    return matchesQuery && matchesAuthor && matchesType;
+  }).sort((a, b) => b.date.localeCompare(a.date));
+}
+
+function collectionResultsHtml(items) {
+  return `
+    <div class="collection-summary">
+      <p class="small-copy">Total memories: ${items.length}</p>
+      <button class="chip-button collection-add-button" data-action="add-memory">Add Memory</button>
+    </div>
+    ${memoryListHtml(items)}
+  `;
+}
+
 function memoryCardHtml(memory) {
   const author = [state.couple.a, state.couple.b].find((p) => p.id === memory.authorUserId);
   const cover = memory.photos?.[0];
@@ -547,25 +566,33 @@ function memoryCardHtml(memory) {
 function collectionHtml() {
   const query = state.searchQuery || "";
   const author = state.authorFilter || "all";
-  const items = (state.memories || []).filter((memory) => {
-    const haystack = [memory.title, memory.place, memory.note, memory.feeling, memory.type].join(" ").toLowerCase();
-    const matchesQuery = haystack.includes(query.toLowerCase());
-    const matchesAuthor = author === "all" || memory.authorUserId === author;
-    return matchesQuery && matchesAuthor;
-  }).sort((a, b) => b.date.localeCompare(a.date));
+  const type = state.typeFilter || "all";
+  const typeOptions = ["Date", "Daily Review", "Trip", "Gift", "Anniversary"];
+  const items = collectionItems(query, author, type);
   return `
     <section class="section">
       <label class="field">
         <span>Search</span>
         <input class="paper-input" value="${escapeAttr(query)}" data-search placeholder="Search by title, place, note, or feeling" />
       </label>
-      <div class="filter-strip">
-        <button class="chip-button ${author === "all" ? "is-active" : ""}" data-author="all">All</button>
-        <button class="chip-button ${author === state.couple.a.id ? "is-active" : ""}" data-author="${state.couple.a.id}">${state.couple.a.nickname}</button>
-        <button class="chip-button ${author === state.couple.b.id ? "is-active" : ""}" data-author="${state.couple.b.id}">${state.couple.b.nickname}</button>
+      <div class="collection-filters">
+        <label class="field">
+          <span>Author</span>
+          <select class="paper-input" data-author-filter>
+            <option value="all" ${author === "all" ? "selected" : ""}>All</option>
+            <option value="${state.couple.a.id}" ${author === state.couple.a.id ? "selected" : ""}>${state.couple.a.nickname}</option>
+            <option value="${state.couple.b.id}" ${author === state.couple.b.id ? "selected" : ""}>${state.couple.b.nickname}</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Type of memory</span>
+          <select class="paper-input" data-type-filter>
+            <option value="all" ${type === "all" ? "selected" : ""}>All</option>
+            ${typeOptions.map((option) => `<option value="${escapeAttr(option)}" ${type === option ? "selected" : ""}>${option}</option>`).join("")}
+          </select>
+        </label>
       </div>
-      <p class="small-copy">Total memories: ${items.length}</p>
-      ${memoryListHtml(items)}
+      <div class="collection-results" data-collection-results>${collectionResultsHtml(items)}</div>
     </section>
   `;
 }
@@ -584,10 +611,8 @@ function bindMemories() {
       setState({ visibleMonth: localISO(next).slice(0, 7) });
     });
   });
-  app.querySelectorAll("[data-memory]").forEach((button) => {
-    button.addEventListener("click", () => setState({ route: "detail", selectedMemoryId: button.dataset.memory }));
-  });
-  app.querySelector("[data-action='add-memory']")?.addEventListener("click", () => setState({ route: "form", editingMemoryId: null }));
+  bindMemoryCards();
+  bindAddMemoryButtons();
   app.querySelector("[data-action='add-anniversary']")?.addEventListener("click", () => setState({ route: "anniversaryForm", editingAnniversaryId: null }));
   app.querySelectorAll("[data-anniversary-menu]").forEach((button) => {
     button.addEventListener("click", () => setState({ anniversaryMenuId: button.dataset.anniversaryMenu }));
@@ -595,10 +620,31 @@ function bindMemories() {
   app.querySelectorAll("[data-anniversary-action]").forEach((button) => {
     button.addEventListener("click", () => handleAnniversaryAction(button.dataset.anniversaryAction));
   });
-  app.querySelector("[data-search]")?.addEventListener("input", (event) => setState({ searchQuery: event.target.value }));
-  app.querySelectorAll("[data-author]").forEach((button) => {
-    button.addEventListener("click", () => setState({ authorFilter: button.dataset.author }));
+  app.querySelector("[data-search]")?.addEventListener("input", (event) => updateCollectionSearch(event.target.value));
+  app.querySelector("[data-author-filter]")?.addEventListener("change", (event) => setState({ authorFilter: event.target.value }));
+  app.querySelector("[data-type-filter]")?.addEventListener("change", (event) => setState({ typeFilter: event.target.value }));
+}
+
+function bindMemoryCards() {
+  app.querySelectorAll("[data-memory]").forEach((button) => {
+    button.addEventListener("click", () => setState({ route: "detail", selectedMemoryId: button.dataset.memory }));
   });
+}
+
+function bindAddMemoryButtons() {
+  app.querySelectorAll("[data-action='add-memory']").forEach((button) => {
+    button.addEventListener("click", () => setState({ route: "form", editingMemoryId: null }));
+  });
+}
+
+function updateCollectionSearch(query) {
+  state.searchQuery = query;
+  saveState();
+  const results = app.querySelector("[data-collection-results]");
+  if (!results) return;
+  results.innerHTML = collectionResultsHtml(collectionItems(query, state.authorFilter || "all", state.typeFilter || "all"));
+  bindMemoryCards();
+  bindAddMemoryButtons();
 }
 
 function handleAnniversaryAction(action) {
@@ -766,7 +812,7 @@ function renderAnniversaryForm() {
     <main class="app-screen">
       <header class="screen-header">
         <button class="icon-button" data-action="back">${icon("back")}</button>
-        <div class="header-stack"><p class="eyebrow">Anniversary</p><h1 class="screen-title">${editing ? "Edit Anniversary" : "Add Anniversary"}</h1></div>
+        <div class="header-stack"><h1 class="screen-title">${editing ? "Edit Anniversary" : "Add Anniversary"}</h1></div>
         <span></span>
       </header>
       <form class="widget-card form-panel form-grid" id="annForm">
