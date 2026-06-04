@@ -1235,6 +1235,8 @@ function matchHtml() {
         ${field(`${state.couple.b.nickname}'s birthday`, "bBirthday", state.couple.b.birthday, "date")}
         ${field(`${state.couple.b.nickname}'s birth time`, "bBirthTime", "", "time", "data-birth-time='b'")}
         <div class="checkbox-row"><input type="checkbox" name="bUnknownTime" data-unknown-time="b" /><span>I don't know the birth time</span></div>
+        <p class="small-copy">AI readings use your names, birthdays, gender selections, and birth times only to generate this compatibility reading. Treat it as reflective entertainment, not certainty.</p>
+        <p class="error-text" id="matchError"></p>
         <button class="button-primary">View Full Reading</button>
       </form>
       ${reports.length ? matchHistoryHtml(reports) : ""}
@@ -1253,30 +1255,71 @@ function bindMatch() {
     syncBirthTimeInput();
     checkbox.addEventListener("change", syncBirthTimeInput);
   });
-  app.querySelector("#matchForm")?.addEventListener("submit", (event) => {
+  app.querySelector("#matchForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const values = Object.fromEntries(new FormData(event.currentTarget));
-    const seed = [...values.aBirthday, ...values.bBirthday].reduce((sum, char) => sum + char.charCodeAt(0), 0);
-    const score = 68 + (seed % 24);
-    const report = {
-      id: uid(),
-      score,
-      createdAt: Date.now(),
-      aName: values.aRealName.trim() || state.couple.a.nickname,
-      bName: values.bRealName.trim() || state.couple.b.nickname,
-      aGender: values.aGender,
-      bGender: values.bGender,
-      summary: "Your rhythm feels gentle and steady. One person brings warmth to small routines, while the other helps turn feelings into clear plans.",
-      natural: "Planning ordinary days together, comforting each other after busy weeks, and keeping promises in small visible ways.",
-      care: "Avoid assuming silence means agreement. A short check-in keeps both hearts on the same page.",
-      prompt: "What is one tiny ritual we want to protect this month?"
+    const form = event.currentTarget;
+    const values = Object.fromEntries(new FormData(form));
+    const submitButton = form.querySelector("button[type='submit'], .button-primary");
+    const matchError = app.querySelector("#matchError");
+    const request = {
+      people: [
+        {
+          role: "partner_a",
+          displayName: state.couple.a.nickname,
+          realName: values.aRealName.trim() || state.couple.a.nickname,
+          gender: values.aGender,
+          birthday: values.aBirthday,
+          birthTime: values.aUnknownTime ? null : values.aBirthTime || null,
+          birthTimeUnknown: Boolean(values.aUnknownTime)
+        },
+        {
+          role: "partner_b",
+          displayName: state.couple.b.nickname,
+          realName: values.bRealName.trim() || state.couple.b.nickname,
+          gender: values.bGender,
+          birthday: values.bBirthday,
+          birthTime: values.bUnknownTime ? null : values.bBirthTime || null,
+          birthTimeUnknown: Boolean(values.bUnknownTime)
+        }
+      ],
+      locale: "en",
+      purpose: "private couple diary compatibility reading"
     };
-    setState({
-      matchReport: report,
-      matchReports: [report, ...matchReports()].slice(0, 12),
-      selectedMatchReportId: report.id,
-      route: "matchReading"
-    });
+
+    matchError.textContent = "";
+    submitButton.disabled = true;
+    submitButton.textContent = "Reading...";
+    try {
+      const response = await fetch("/api/saju-reading", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request)
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not generate this reading.");
+      const report = {
+        id: uid(),
+        createdAt: Date.now(),
+        aName: request.people[0].realName,
+        bName: request.people[1].realName,
+        aGender: request.people[0].gender,
+        bGender: request.people[1].gender,
+        aiGenerated: true,
+        ...data.reading
+      };
+      setState({
+        matchReport: report,
+        matchReports: [report, ...matchReports()].slice(0, 12),
+        selectedMatchReportId: report.id,
+        route: "matchReading"
+      });
+    } catch (error) {
+      matchError.textContent = error.message.includes("OPENAI_API_KEY")
+        ? "AI reading is not configured yet. Add OPENAI_API_KEY on the server and try again."
+        : error.message;
+      submitButton.disabled = false;
+      submitButton.textContent = "View Full Reading";
+    }
   });
   app.querySelectorAll("[data-match-report]").forEach((button) => {
     button.addEventListener("click", () => setState({ route: "matchReading", selectedMatchReportId: button.dataset.matchReport }));
@@ -1289,19 +1332,60 @@ function matchReports() {
   return state.matchReport ? [{ ...state.matchReport, id: state.matchReport.id || "latest", createdAt: state.matchReport.createdAt || Date.now() }] : [];
 }
 
+const compatibilityCategoryLabels = {
+  fate: "Fate Match",
+  fun: "Fun Match",
+  love: "Love Match",
+  wealth: "Wealth Match",
+  children: "Children Match",
+  marriage: "Marriage Match"
+};
+
+function reportPairName(report) {
+  return `${escapeHtml(report.aName || state.couple.a.nickname)} ♥ ${escapeHtml(report.bName || state.couple.b.nickname)}`;
+}
+
+function reportCategories(report) {
+  const order = ["fate", "fun", "love", "wealth", "children", "marriage"];
+  const fallback = [
+    { key: "fate", score: report.score || 80, reading: report.natural || report.summary || "A steady sense of timing brings you closer." },
+    { key: "fun", score: Math.max(1, (report.score || 80) - 6), reading: "Small shared rituals can keep the relationship playful." },
+    { key: "love", score: Math.min(100, (report.score || 80) + 3), reading: report.summary || "Warm affection grows through visible care." },
+    { key: "wealth", score: Math.max(1, (report.score || 80) - 12), reading: "Planning together helps money feel less stressful." },
+    { key: "children", score: Math.max(1, (report.score || 80) - 15), reading: "Your nurturing styles may need gentle conversation and patience." },
+    { key: "marriage", score: Math.max(1, (report.score || 80) - 2), reading: report.care || "Long-term harmony grows from clear promises and steady check-ins." }
+  ];
+  const categories = report.categories?.length ? report.categories : fallback;
+  return order.map((key) => categories.find((category) => category.key === key) || fallback.find((category) => category.key === key)).map((category) => ({
+    ...category,
+    label: compatibilityCategoryLabels[category.key] || category.label || category.key
+  }));
+}
+
 function matchHistoryHtml(reports) {
   return `
     <section class="section">
       <div class="section-heading"><h2>Reading History</h2></div>
-      <div class="settings-list">
+      <div class="match-history-list">
         ${reports.map((report) => `
-          <button class="settings-row" data-match-report="${report.id}">
-            <div>
-              <strong>${report.score}% Overall Match</strong>
-              <span>${fmt(localISO(new Date(report.createdAt || Date.now())), { month: "long", day: "numeric", year: "numeric" })} - ${escapeHtml(report.aName || state.couple.a.nickname)} & ${escapeHtml(report.bName || state.couple.b.nickname)}</span>
+          <article class="widget-card form-panel section match-history-card">
+            <p class="match-pair">${reportPairName(report)}</p>
+            <div class="match-overall">
+              <span>Overall Match</span>
+              <strong>${report.score}</strong>
             </div>
-            <span>&gt;</span>
-          </button>
+            <p class="body-copy">${escapeHtml(report.summary || "A quiet bond that feels familiar and steady.")}</p>
+            <button class="button-primary" data-match-report="${report.id}">View Full Reading</button>
+            <h3 class="compatibility-category-title">Compatibility Categories</h3>
+            <div class="compatibility-category-list">
+              ${reportCategories(report).map((category) => `
+                <div class="compatibility-category-row">
+                  <span>${escapeHtml(category.label)}</span>
+                  <strong>${category.score}</strong>
+                </div>
+              `).join("")}
+            </div>
+          </article>
         `).join("")}
       </div>
     </section>
@@ -1315,7 +1399,7 @@ function renderMatchReading() {
   app.innerHTML = `
     <main class="app-screen">
       <header class="screen-header">
-        <button class="icon-button" data-action="back">${icon("back")}</button>
+        <button class="icon-button" data-action="back">X</button>
         <div class="header-stack"><h1 class="screen-title">Compatibility Reading</h1></div>
         <span></span>
       </header>
@@ -1326,21 +1410,32 @@ function renderMatchReading() {
 }
 
 function reportHtml(report) {
+  const categories = reportCategories(report);
   return `
-    <article class="widget-card form-panel section">
-      <div class="report-score">
-        <div class="score-ring" style="--score:${report.score}%">${report.score}%</div>
-        <div>
-          <p class="eyebrow">Compatibility Reading</p>
-          <h2 class="duari-display">Overall Match</h2>
+    <article class="widget-card form-panel section compatibility-report-card">
+      <div class="match-report-hero">
+        <p class="match-pair">${reportPairName(report)}</p>
+        <div class="match-overall">
+          <span>Overall Match</span>
+          <strong>${report.score}</strong>
         </div>
       </div>
-      <p class="body-copy">${report.summary}</p>
-      <div class="settings-list">
-        <div class="settings-row"><div><strong>What feels natural</strong><span>${report.natural}</span></div></div>
-        <div class="settings-row"><div><strong>What may need care</strong><span>${report.care}</span></div></div>
-        <div class="settings-row"><div><strong>Conversation prompt</strong><span>${report.prompt}</span></div></div>
-      </div>
+      <h2>Summary</h2>
+      <p class="body-copy">${escapeHtml(report.summary)}</p>
+      ${categories.map((category) => `
+        <section class="compatibility-detail-block">
+          <div class="compatibility-detail-heading">
+            <h2>${escapeHtml(category.label)}</h2>
+            <strong>${category.score}</strong>
+          </div>
+          <p class="body-copy">${escapeHtml(category.reading || "")}</p>
+        </section>
+      `).join("")}
+      <section class="compatibility-detail-block">
+        <h2>Gentle Advice</h2>
+        <p class="body-copy">${escapeHtml(report.gentleAdvice || report.prompt || "Keep returning to small, honest conversations.")}</p>
+      </section>
+      ${report.aiGenerated ? `<p class="small-copy">AI-generated reading for reflection and entertainment. It is not a certain prediction or professional advice.</p>` : ""}
       <div class="two-grid"><button class="button-secondary">Share</button><button class="button-secondary">Save as PDF</button></div>
     </article>
   `;
@@ -1414,7 +1509,7 @@ function settingsPageHtml(page) {
     return `<section class="widget-card form-panel section"><h2>Backup</h2><p class="body-copy">Your memories are safely backed up in this browser with localStorage.</p><p class="small-copy">Last updated: ${fmt(todayISO(), { month: "long", day: "numeric", year: "numeric" })}</p><button class="button-secondary" disabled>Export PDF</button></section>`;
   }
   if (page === "legal") {
-    return `<section class="widget-card form-panel section"><h2>Terms of Service</h2><p class="body-copy">Legal pages are placeholders for the commercial version.</p><h2>Privacy Policy</h2><p class="body-copy">The local prototype stores data only in this browser.</p><h2>Refund Policy</h2><p class="body-copy">Template purchases are coming soon.</p></section>`;
+    return `<section class="widget-card form-panel section"><h2>Terms of Service</h2><p class="body-copy">Legal pages are placeholders for the commercial version.</p><h2>Privacy Policy</h2><p class="body-copy">Memories are stored in this browser. For AI Saju readings, the app sends the names, gender selections, birthdays, and birth times you enter to the server only to generate the requested reading. Do not enter information you do not want processed for that purpose.</p><h2>Refund Policy</h2><p class="body-copy">Template purchases are coming soon.</p></section>`;
   }
   return `<section class="widget-card form-panel section"><h2>DUARI</h2><p class="body-copy">Our Memory Book localStorage prototype.</p><p class="small-copy">Memories: ${state.memories.length} · Anniversaries: ${state.anniversaries.length}</p></section>`;
 }

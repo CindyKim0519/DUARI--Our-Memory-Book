@@ -1,42 +1,4 @@
-import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
-import { extname, join, normalize } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const root = fileURLToPath(new URL(".", import.meta.url));
-const port = Number(process.env.PORT || 4173);
 const openaiModel = process.env.OPENAI_MODEL || "gpt-5.2";
-const types = {
-  ".html": "text/html; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8"
-};
-
-function readJsonBody(req) {
-  return new Promise((resolve, reject) => {
-    let body = "";
-    req.on("data", (chunk) => {
-      body += chunk;
-      if (body.length > 64_000) {
-        reject(new Error("Request body is too large."));
-        req.destroy();
-      }
-    });
-    req.on("end", () => {
-      try {
-        resolve(JSON.parse(body || "{}"));
-      } catch {
-        reject(new Error("Invalid JSON."));
-      }
-    });
-    req.on("error", reject);
-  });
-}
-
-function sendJson(res, statusCode, data) {
-  res.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(data));
-}
 
 function outputTextFromResponse(data) {
   if (typeof data.output_text === "string") return data.output_text;
@@ -116,27 +78,16 @@ async function createSajuReading(input) {
   return JSON.parse(outputTextFromResponse(data));
 }
 
-createServer(async (req, res) => {
-  try {
-    const url = new URL(req.url || "/", `http://${req.headers.host}`);
-    if (url.pathname === "/api/saju-reading" && req.method === "POST") {
-      const input = await readJsonBody(req);
-      const reading = await createSajuReading(input);
-      return sendJson(res, 200, { reading });
-    }
-
-    const safePath = normalize(url.pathname).replace(/^([/\\])+/, "");
-    const filePath = join(root, safePath || "index.html");
-    const body = await readFile(filePath);
-    res.writeHead(200, { "Content-Type": types[extname(filePath)] || "application/octet-stream" });
-    res.end(body);
-  } catch (error) {
-    if (req.url?.startsWith("/api/")) {
-      return sendJson(res, error.statusCode || 500, { error: error.message || "Server error." });
-    }
-    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("Not found");
+export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    res.status(405).json({ error: "Method not allowed." });
+    return;
   }
-}).listen(port, "127.0.0.1", () => {
-  console.log(`DUARI prototype: http://127.0.0.1:${port}`);
-});
+
+  try {
+    const reading = await createSajuReading(req.body || {});
+    res.status(200).json({ reading });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message || "Server error." });
+  }
+}
