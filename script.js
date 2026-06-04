@@ -1,6 +1,20 @@
 const STORAGE_KEY = "duari-memory-book-v1";
 const app = document.querySelector("#app");
 const templates = window.DUARI_TEMPLATE_CATALOG || [];
+const memoryTypeOptions = ["Date", "Travel", "Letter", "Conflict & Repair", "Special Day", "Daily Review"];
+const feelingOptions = ["Happy", "Loved", "Grateful", "Touched", "Comforted", "Excited", "Missing You", "Funny", "Sorry", "A Little Hurt", "Made Up", "Hopeful"];
+const memoryTypeAliases = {
+  Trip: "Travel",
+  Anniversary: "Special Day",
+  Food: "Date",
+  Gift: "Special Day",
+  Promise: "Letter",
+  "Everyday Moment": "Daily Review",
+  "First Time": "Special Day",
+  Milestone: "Special Day",
+  "Home Date": "Date"
+};
+const feelingAliases = { Calm: "Comforted", Tender: "Touched" };
 
 const localISO = (date = new Date()) => {
   const year = date.getFullYear();
@@ -12,6 +26,14 @@ const todayISO = () => localISO();
 const uid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
 const fmt = (date, options = {}) => new Intl.DateTimeFormat("en", options).format(new Date(`${date}T12:00:00`));
 const dayMs = 24 * 60 * 60 * 1000;
+
+function normalizeMemory(memory) {
+  return {
+    ...memory,
+    type: memoryTypeAliases[memory.type] || memory.type,
+    feeling: feelingAliases[memory.feeling] || memory.feeling
+  };
+}
 
 const sampleState = () => {
   const today = todayISO();
@@ -42,7 +64,7 @@ const sampleState = () => {
         note: "We had quiet coffee, shared a tiny cake, and wrote down our next weekend plan.",
         authorUserId: "mina",
         photos: [],
-        together: { workout: true, reading: false, walk: true },
+        together: { workout: true, reading: false, customRoutines: [] },
         plan: { goal: "Take a slow walk", plan: "Meet after work and pick one dessert together." },
         createdAt: Date.now()
       },
@@ -51,12 +73,12 @@ const sampleState = () => {
         date: today,
         title: "Bookstore Notes",
         type: "Daily Review",
-        feeling: "Calm",
+        feeling: "Comforted",
         place: "Small Bookshop",
         note: "Jay found a poetry book. Mina kept the receipt as a tiny bookmark.",
         authorUserId: "jay",
         photos: [],
-        together: { workout: false, reading: true, walk: false },
+        together: { workout: false, reading: true, customRoutines: [] },
         plan: { goal: "Read ten pages", plan: "Pick a sentence to remember." },
         createdAt: Date.now() - 500
       },
@@ -64,13 +86,13 @@ const sampleState = () => {
         id: uid(),
         date: `${year}-05-30`,
         title: "Picnic Blanket",
-        type: "Trip",
+        type: "Travel",
         feeling: "Loved",
         place: "Han River",
         note: "A soft picnic day with cloudy weather and too many strawberries.",
         authorUserId: "mina",
         photos: [],
-        together: { workout: false, reading: false, walk: true },
+        together: { workout: false, reading: false, customRoutines: [] },
         plan: { goal: "", plan: "" },
         createdAt: Date.now() - 1000
       }
@@ -89,7 +111,9 @@ function loadState() {
   const saved = localStorage.getItem(STORAGE_KEY);
   if (!saved) return { ready: false, route: "welcome" };
   try {
-    return { ...sampleState(), ...JSON.parse(saved) };
+    const parsed = JSON.parse(saved);
+    const merged = { ...sampleState(), ...parsed };
+    return { ...merged, memories: (merged.memories || []).map(normalizeMemory) };
   } catch {
     return { ready: false, route: "welcome" };
   }
@@ -567,7 +591,7 @@ function collectionHtml() {
   const query = state.searchQuery || "";
   const author = state.authorFilter || "all";
   const type = state.typeFilter || "all";
-  const typeOptions = ["Date", "Daily Review", "Trip", "Gift", "Anniversary"];
+  const typeOptions = memoryTypeOptions;
   const items = collectionItems(query, author, type);
   return `
     <section class="section">
@@ -676,32 +700,37 @@ function renderMemoryForm() {
     <main class="app-screen">
       <header class="screen-header">
         <button class="icon-button" data-action="back">${icon("back")}</button>
-        <div class="header-stack"><p class="eyebrow">Memories</p><h1 class="screen-title">${editing ? "Edit Memory" : "Add Memory"}</h1></div>
+        <div class="header-stack"><h1 class="screen-title">${editing ? "Edit Memory" : "Add Memory"}</h1></div>
         <span></span>
       </header>
       <form class="form-grid" id="memoryForm">
         <section class="widget-card photo-picker">
           <strong>Photo Gallery</strong>
           <p class="small-copy">First photo becomes the cover.</p>
-          <input type="file" accept="image/*" multiple data-photo-input />
-          <div class="photo-grid" id="photoPreview">${(memory.photos || []).map((src) => `<img src="${src}" alt="" />`).join("")}</div>
+          <div class="photo-upload-row">
+            <label class="button-secondary photo-upload-button" for="memoryPhotoInput">Choose Photos</label>
+            <span class="photo-upload-status" data-photo-status>No photos selected</span>
+          </div>
+          <input class="sr-only" id="memoryPhotoInput" type="file" accept="image/*" multiple data-photo-input />
+          <div class="photo-grid" id="photoPreview"></div>
         </section>
         <section class="widget-card form-panel form-grid">
           ${field("Date", "date", memory.date, "date")}
-          ${field("Title", "title", escapeAttr(memory.title))}
-          ${selectField("Memory type", "type", ["Date", "Daily Review", "Trip", "Gift", "Anniversary"], memory.type)}
-          ${selectField("Feeling", "feeling", ["Happy", "Calm", "Loved", "Funny", "Grateful", "Tender"], memory.feeling)}
+          <label class="field"><span>Title <span class="required-mark" aria-hidden="true">*</span></span><input class="paper-input" name="title" type="text" value="${escapeAttr(memory.title)}" required aria-required="true" /></label>
+          ${selectField("Memory type", "type", memoryTypeOptions, memory.type)}
+          ${selectField("Feeling", "feeling", feelingOptions, memory.feeling)}
           ${field("Where did it happen?", "place", escapeAttr(memory.place))}
           <label class="field"><span>Note</span><textarea class="paper-input" name="note" placeholder="Write down the moment you want to remember today.">${escapeHtml(memory.note)}</textarea></label>
         </section>
-        <section class="widget-card form-panel form-grid">
-          <span class="section-label">Routine</span>
-          ${checkField("Workout day", "workout", memory.together?.workout)}
-          ${checkField("Reading day", "reading", memory.together?.reading)}
-          ${checkField("Walk day", "walk", memory.together?.walk)}
+        <section class="widget-card form-panel form-grid routine-form-card">
           <span class="section-label">Daily Plan</span>
           ${field("My goal today", "goal", escapeAttr(memory.plan?.goal || ""))}
           <label class="field"><span>My plan today</span><textarea class="paper-input" name="plan">${escapeHtml(memory.plan?.plan || "")}</textarea></label>
+          <div class="routine-header">
+            <span class="section-label">Routine</span>
+            <button class="button-secondary routine-add-button" type="button" data-action="add-routine">Add Routine</button>
+          </div>
+          <div class="routine-list" id="routineList"></div>
         </section>
         <p class="error-text" id="memoryError"></p>
         <div class="sticky-actions">
@@ -709,18 +738,113 @@ function renderMemoryForm() {
           ${editing ? `<button class="danger-button" type="button" data-action="delete">Delete this memory?</button>` : ""}
         </div>
       </form>
+      <div class="modal-backdrop routine-modal" id="routineModal" hidden>
+        <div class="routine-dialog" role="dialog" aria-modal="true" aria-labelledby="routineModalTitle">
+          <div class="routine-dialog-header">
+            <h2 id="routineModalTitle">Add Routine</h2>
+            <button class="routine-dialog-close" type="button" data-action="close-routine-modal" aria-label="Close">x</button>
+          </div>
+          <label class="field"><span>Routine name</span><input class="paper-input" id="routineNameInput" type="text" maxlength="32" placeholder="e.g. Stretching" /></label>
+          <p class="error-text" id="routineModalError"></p>
+          <div class="routine-dialog-actions">
+            <button class="button-ghost" type="button" data-action="close-routine-modal">Cancel</button>
+            <button class="button-primary" type="button" data-action="save-routine">Add</button>
+          </div>
+        </div>
+      </div>
     </main>
   `;
   let photos = [...(memory.photos || [])];
+  let customRoutines = [...(memory.together?.customRoutines || [])];
+  const routineOptionHtml = ({ label, name = "customRoutine", checked = true, removable = false }) => `
+    <div class="routine-option">
+      <label class="routine-option-main">
+        <input type="checkbox" name="${name}" value="${escapeAttr(label)}" ${checked ? "checked" : ""} />
+        <span>${escapeHtml(label)}</span>
+      </label>
+      ${removable ? `<button class="routine-remove" type="button" data-routine-remove="${escapeAttr(label)}" aria-label="Remove ${escapeAttr(label)}">x</button>` : ""}
+    </div>
+  `;
+  const renderRoutineList = () => {
+    app.querySelector("#routineList").innerHTML = [
+      routineOptionHtml({ label: "Workout", name: "workout", checked: memory.together?.workout }),
+      routineOptionHtml({ label: "Reading", name: "reading", checked: memory.together?.reading }),
+      ...customRoutines.map((label) => routineOptionHtml({ label, checked: true, removable: true }))
+    ].join("");
+  };
+  const updatePhotoStatus = () => {
+    const label = photos.length === 1 ? "1 photo in gallery" : `${photos.length} photos in gallery`;
+    app.querySelector("[data-photo-status]").textContent = photos.length ? label : "No photos selected";
+  };
+  const renderPhotoPreview = () => {
+    app.querySelector("#photoPreview").innerHTML = photos.map((src, index) => `
+      <div class="photo-tile">
+        <img src="${src}" alt="" />
+        <button class="photo-remove" type="button" data-photo-remove="${index}" aria-label="Remove photo">x</button>
+      </div>
+    `).join("");
+    updatePhotoStatus();
+  };
+  renderPhotoPreview();
+  renderRoutineList();
+  const routineModal = app.querySelector("#routineModal");
+  const routineNameInput = app.querySelector("#routineNameInput");
+  const routineModalError = app.querySelector("#routineModalError");
+  const openRoutineModal = () => {
+    routineModal.hidden = false;
+    routineNameInput.value = "";
+    routineModalError.textContent = "";
+    routineNameInput.focus();
+  };
+  const closeRoutineModal = () => {
+    routineModal.hidden = true;
+  };
+  const saveRoutineFromModal = () => {
+    const cleanLabel = routineNameInput.value.trim();
+    if (!cleanLabel) {
+      routineModalError.textContent = "Routine name can't be empty.";
+      return;
+    }
+    if (customRoutines.some((item) => item.toLowerCase() === cleanLabel.toLowerCase()) || ["workout", "reading"].includes(cleanLabel.toLowerCase())) {
+      routineModalError.textContent = "This routine already exists.";
+      return;
+    }
+    customRoutines = [...customRoutines, cleanLabel];
+    renderRoutineList();
+    closeRoutineModal();
+  };
   app.querySelector("[data-action='back']").addEventListener("click", () => setState({ route: null }));
   app.querySelector("[data-action='delete']")?.addEventListener("click", () => {
     if (confirm("Delete this memory?")) setState({ memories: state.memories.filter((item) => item.id !== editing.id), route: null });
+  });
+  app.querySelector("[data-action='add-routine']").addEventListener("click", openRoutineModal);
+  app.querySelectorAll("[data-action='close-routine-modal']").forEach((button) => button.addEventListener("click", closeRoutineModal));
+  app.querySelector("[data-action='save-routine']").addEventListener("click", saveRoutineFromModal);
+  routineNameInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") saveRoutineFromModal();
+    if (event.key === "Escape") closeRoutineModal();
+  });
+  routineModal.addEventListener("click", (event) => {
+    if (event.target === routineModal) closeRoutineModal();
+  });
+  app.querySelector("#routineList").addEventListener("click", (event) => {
+    const removeButton = event.target.closest("[data-routine-remove]");
+    if (!removeButton) return;
+    customRoutines = customRoutines.filter((label) => label !== removeButton.dataset.routineRemove);
+    renderRoutineList();
+  });
+  app.querySelector("#photoPreview").addEventListener("click", (event) => {
+    const removeButton = event.target.closest("[data-photo-remove]");
+    if (!removeButton) return;
+    photos = photos.filter((_, index) => index !== Number(removeButton.dataset.photoRemove));
+    renderPhotoPreview();
   });
   app.querySelector("[data-photo-input]").addEventListener("change", async (event) => {
     const files = [...event.target.files].slice(0, 6);
     const loaded = await Promise.all(files.map(fileToDataUrl));
     photos = [...photos, ...loaded].slice(0, 6);
-    app.querySelector("#photoPreview").innerHTML = photos.map((src) => `<img src="${src}" alt="" />`).join("");
+    renderPhotoPreview();
+    event.target.value = "";
   });
   app.querySelector("#memoryForm").addEventListener("submit", (event) => {
     event.preventDefault();
@@ -738,7 +862,7 @@ function renderMemoryForm() {
       place: values.place.trim(),
       note: values.note.trim(),
       photos,
-      together: { workout: Boolean(values.workout), reading: Boolean(values.reading), walk: Boolean(values.walk) },
+      together: { workout: Boolean(values.workout), reading: Boolean(values.reading), customRoutines: [...new FormData(event.currentTarget).getAll("customRoutine")].map((item) => item.trim()).filter(Boolean) },
       plan: { goal: values.goal.trim(), plan: values.plan.trim() },
       authorUserId: editing?.authorUserId || currentUser().id,
       createdAt: editing?.createdAt || Date.now(),
@@ -818,16 +942,20 @@ function dailyTogetherDetailRows(date) {
   const latestByAuthor = Object.fromEntries(
     people.map((person) => [person.id, memoryItems.find((item) => item.authorUserId === person.id)])
   );
+  const customRoutineLabels = [...new Set(memoryItems.flatMap((item) => item.together?.customRoutines || []))];
   const rows = [
-    { key: "workout", label: "workout" },
-    { key: "reading", label: "reading" }
+    { key: "workout", label: "Workout" },
+    { key: "reading", label: "Reading" },
+    ...customRoutineLabels.map((label) => ({ key: label, label, custom: true }))
   ];
 
   return rows.map((row) => `
     <div class="daily-together-row">
       <span class="daily-together-label">${row.label}</span>
       ${people.map((person) => {
-        const checked = latestByAuthor[person.id]?.together?.[row.key];
+        const checked = row.custom
+          ? latestByAuthor[person.id]?.together?.customRoutines?.includes(row.key)
+          : latestByAuthor[person.id]?.together?.[row.key];
         return `<span class="daily-person-status"><span>${escapeHtml(person.nickname.toLowerCase())}</span> <strong>${checked ? "✓" : "-"}</strong></span>`;
       }).join("")}
     </div>
