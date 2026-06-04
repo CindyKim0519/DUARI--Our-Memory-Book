@@ -345,11 +345,10 @@ function renderWho() {
 function renderMain() {
   app.innerHTML = `
     <main class="app-screen">
-      ${headerHtml()}
       ${summaryHtml()}
       ${tabContent()}
     </main>
-    ${state.activeTab === "memories" ? `<button class="floating-add" data-action="add-memory" aria-label="Add Memory">${icon("add")}</button>` : ""}
+    ${state.activeTab === "memories" && state.memoryView !== "calendar" ? `<button class="floating-add" data-action="add-memory" aria-label="Add Memory">${icon("add")}</button>` : ""}
     ${bottomNavHtml()}
   `;
   bindHeader();
@@ -381,11 +380,12 @@ function summaryHtml() {
   return `
     <section class="widget-card summary-widget">
       <div>
-        <p class="eyebrow">${state.couple.a.nickname} ♥ ${state.couple.b.nickname}</p>
+        <div class="summary-topline">
+          <p class="eyebrow">${state.couple.a.nickname} ♥ ${state.couple.b.nickname}</p>
+          <button class="icon-button switch-user-button" data-tone="${currentUser().id === state.couple.b.id ? "love" : "sage"}" data-action="switch-user" aria-label="Switch user">${currentUser().nickname.slice(0, 1)}</button>
+        </div>
         <h2 class="duari-display">${daysTogether()} days together</h2>
-        <p class="small-copy">A quiet little place for your memories, plans, and tiny anniversaries.</p>
       </div>
-      <div class="days-count"><div><strong>${daysTogether()}</strong><span>DAYS</span></div></div>
     </section>
   `;
 }
@@ -433,26 +433,34 @@ function calendarHtml() {
         ${days.map((day) => dayCell(day)).join("")}
       </div>
     </section>
-    <section class="widget-card selected-card section">
+    <section class="widget-card selected-card selected-day-panel section">
       <div class="section-heading">
         <div>
           <p class="eyebrow">${fmt(state.selectedDate, { weekday: "long" })}</p>
           <h2>${fmt(state.selectedDate, { month: "long", day: "numeric", year: "numeric" })}</h2>
         </div>
-        <button class="chip-button" data-action="add-anniversary">Add Anniversary</button>
       </div>
       <p class="small-copy">${selectedMemories.length} memories · ${selectedAnniversaries.length} anniversary</p>
-      ${selectedAnniversaries.length ? `<div class="filter-strip">${selectedAnniversaries.map((item) => `<span class="chip" data-tone="love">${item.title}</span>`).join("")}</div>` : ""}
-      ${memoryListHtml(selectedMemories)}
+      <div class="selected-day-block">
+        <h2>Anniversaries</h2>
+        ${anniversaryListHtml(selectedAnniversaries)}
+      </div>
+      <div class="selected-day-block">
+        <h2>Memories</h2>
+        ${selectedMemories.length ? memoryListHtml(selectedMemories) : `<div class="selected-empty"><p>No memories on this date yet.</p><p>Try another day you shared.</p></div>`}
+      </div>
+      <div class="selected-actions">
+        <button class="button-secondary" data-action="add-anniversary">Add Anniversary</button>
+        <button class="button-primary" data-action="add-memory">Add Memory</button>
+      </div>
     </section>
+    ${anniversaryActionSheetHtml()}
   `;
 }
 
 function dayCell(day) {
   const mems = memoriesForDate(day.iso);
   const anns = anniversariesForDate(day.iso);
-  const hasWorkout = mems.some((m) => m.together?.workout);
-  const hasReading = mems.some((m) => m.together?.reading);
   const classes = [
     "day-cell",
     day.muted ? "is-muted" : "",
@@ -463,12 +471,42 @@ function dayCell(day) {
     <button class="${classes}" data-date="${day.iso}">
       ${day.day}
       <span class="day-marks">
-        ${mems.length ? `<span class="mark"></span>` : ""}
-        ${anns.length ? `<span class="mark-love"></span>` : ""}
-        ${hasWorkout ? `<span class="mark-text">W</span>` : ""}
-        ${hasReading ? `<span class="mark-text">R</span>` : ""}
+        ${anns.length ? `<span class="mark-love" aria-label="${anns.length} anniversaries">&hearts;</span>` : ""}
+        ${mems.length ? `<span class="mark-count" aria-label="${mems.length} memories">${mems.length}</span>` : ""}
       </span>
     </button>
+  `;
+}
+
+function anniversaryListHtml(items) {
+  if (!items.length) return `<p class="small-copy">No anniversaries on this date.</p>`;
+  return `<div class="anniversary-list">${items.map(anniversaryCardHtml).join("")}</div>`;
+}
+
+function anniversaryCardHtml(item) {
+  return `
+    <article class="anniversary-card">
+      <span class="anniversary-heart">♥</span>
+      <div class="anniversary-copy">
+        <h3>${escapeHtml(item.title)}</h3>
+        <p>${escapeHtml(item.memo || "No note yet.")}</p>
+      </div>
+      <button class="anniversary-more" data-anniversary-menu="${item.id}" aria-label="More anniversary actions">•••</button>
+    </article>
+  `;
+}
+
+function anniversaryActionSheetHtml() {
+  const anniversary = state.anniversaries?.find((item) => item.id === state.anniversaryMenuId);
+  if (!anniversary) return "";
+  return `
+    <div class="modal-backdrop" role="presentation">
+      <div class="action-sheet" role="dialog" aria-modal="true" aria-label="Anniversary actions">
+        <button data-anniversary-action="edit">수정</button>
+        <button class="danger-action" data-anniversary-action="delete">삭제</button>
+        <button data-anniversary-action="cancel">취소</button>
+      </div>
+    </div>
   `;
 }
 
@@ -550,11 +588,29 @@ function bindMemories() {
     button.addEventListener("click", () => setState({ route: "detail", selectedMemoryId: button.dataset.memory }));
   });
   app.querySelector("[data-action='add-memory']")?.addEventListener("click", () => setState({ route: "form", editingMemoryId: null }));
-  app.querySelector("[data-action='add-anniversary']")?.addEventListener("click", () => setState({ route: "anniversaryForm" }));
+  app.querySelector("[data-action='add-anniversary']")?.addEventListener("click", () => setState({ route: "anniversaryForm", editingAnniversaryId: null }));
+  app.querySelectorAll("[data-anniversary-menu]").forEach((button) => {
+    button.addEventListener("click", () => setState({ anniversaryMenuId: button.dataset.anniversaryMenu }));
+  });
+  app.querySelectorAll("[data-anniversary-action]").forEach((button) => {
+    button.addEventListener("click", () => handleAnniversaryAction(button.dataset.anniversaryAction));
+  });
   app.querySelector("[data-search]")?.addEventListener("input", (event) => setState({ searchQuery: event.target.value }));
   app.querySelectorAll("[data-author]").forEach((button) => {
     button.addEventListener("click", () => setState({ authorFilter: button.dataset.author }));
   });
+}
+
+function handleAnniversaryAction(action) {
+  const anniversary = state.anniversaries.find((item) => item.id === state.anniversaryMenuId);
+  if (!anniversary || action === "cancel") return setState({ anniversaryMenuId: null });
+  if (action === "edit") return setState({ route: "anniversaryForm", editingAnniversaryId: anniversary.id, anniversaryMenuId: null });
+  if (action === "delete") {
+    return setState({
+      anniversaries: state.anniversaries.filter((item) => item.id !== anniversary.id),
+      anniversaryMenuId: null
+    });
+  }
 }
 
 function renderMemoryForm() {
@@ -704,20 +760,22 @@ function renderMemoryDetail() {
 }
 
 function renderAnniversaryForm() {
+  const editing = state.anniversaries.find((item) => item.id === state.editingAnniversaryId);
+  const anniversary = editing || { title: "", date: state.selectedDate, repeatYearly: false, memo: "" };
   app.innerHTML = `
     <main class="app-screen">
       <header class="screen-header">
         <button class="icon-button" data-action="back">${icon("back")}</button>
-        <div class="header-stack"><p class="eyebrow">Anniversary</p><h1 class="screen-title">Add Anniversary</h1></div>
+        <div class="header-stack"><p class="eyebrow">Anniversary</p><h1 class="screen-title">${editing ? "Edit Anniversary" : "Add Anniversary"}</h1></div>
         <span></span>
       </header>
       <form class="widget-card form-panel form-grid" id="annForm">
-        ${field("Anniversary name", "title", "100 Days Together")}
-        ${field("Date", "date", state.selectedDate, "date")}
-        <label class="checkbox-row"><input type="checkbox" name="repeatYearly" /> Repeat yearly</label>
-        <label class="field"><span>Memo</span><textarea class="paper-input" name="memo"></textarea></label>
+        ${field("Anniversary name", "title", escapeAttr(anniversary.title))}
+        ${field("Date", "date", anniversary.date, "date")}
+        <label class="checkbox-row"><input type="checkbox" name="repeatYearly" ${anniversary.repeatYearly ? "checked" : ""} /> Repeat yearly</label>
+        <label class="field"><span>Note</span><textarea class="paper-input" name="memo">${escapeHtml(anniversary.memo)}</textarea></label>
         <p class="error-text" id="annError"></p>
-        <button class="button-primary">Save</button>
+        <button class="button-primary">${editing ? "Save Changes" : "Save"}</button>
       </form>
     </main>
   `;
@@ -729,8 +787,19 @@ function renderAnniversaryForm() {
       app.querySelector("#annError").textContent = "Anniversary name can't be empty.";
       return;
     }
-    const anniversary = { id: uid(), title: values.title.trim(), date: values.date, repeatYearly: Boolean(values.repeatYearly), memo: values.memo.trim(), createdAt: Date.now() };
-    setState({ anniversaries: [anniversary, ...state.anniversaries], selectedDate: values.date, visibleMonth: values.date.slice(0, 7), route: null });
+    const payload = {
+      id: editing?.id || uid(),
+      title: values.title.trim(),
+      date: values.date,
+      repeatYearly: Boolean(values.repeatYearly),
+      memo: values.memo.trim(),
+      createdAt: editing?.createdAt || Date.now(),
+      updatedAt: Date.now()
+    };
+    const anniversaries = editing
+      ? state.anniversaries.map((item) => item.id === editing.id ? payload : item)
+      : [payload, ...state.anniversaries];
+    setState({ anniversaries, selectedDate: values.date, visibleMonth: values.date.slice(0, 7), route: null, editingAnniversaryId: null });
   });
 }
 

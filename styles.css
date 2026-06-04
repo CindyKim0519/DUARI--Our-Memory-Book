@@ -327,10 +327,39 @@ textarea.paper-input {
 
 .summary-widget {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-4);
   align-items: center;
   padding: var(--space-5);
+  box-shadow: none;
+}
+
+.summary-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.summary-topline .eyebrow {
+  margin: 0;
+}
+
+.switch-user-button {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  color: var(--color-sage-700);
+  background: var(--color-primary-soft);
+  box-shadow: none;
+  font-family: var(--font-display);
+  font-size: var(--text-body-md);
+  font-weight: 700;
+}
+
+.switch-user-button[data-tone="love"] {
+  color: #765f58;
+  background: rgba(239, 184, 170, 0.42);
 }
 
 .days-count {
@@ -358,7 +387,14 @@ textarea.paper-input {
   font-weight: 900;
 }
 
-.tab-strip,
+.tab-strip {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
 .filter-strip {
   display: flex;
   gap: var(--space-2);
@@ -469,28 +505,144 @@ textarea.paper-input {
   gap: 3px;
 }
 
-.mark {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--color-primary);
-}
-
 .mark-love {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--color-accent-love);
+  color: #8d6b63;
+  font-size: 10px;
+  line-height: 1;
 }
 
-.mark-text {
+.mark-count {
   color: var(--color-sage-700);
-  font-size: 9px;
+  font-size: 10px;
+  font-weight: 900;
   line-height: 1;
 }
 
 .selected-card {
   padding: var(--space-5);
+}
+
+.selected-day-panel {
+  gap: var(--space-5);
+}
+
+.selected-day-block {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.selected-day-block h2 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--text-title-md);
+  font-weight: 900;
+}
+
+.anniversary-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.anniversary-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-soft);
+  box-shadow: var(--shadow-card);
+}
+
+.anniversary-heart {
+  color: var(--color-accent-love);
+  font-size: 26px;
+  line-height: 1;
+}
+
+.anniversary-copy {
+  min-width: 0;
+}
+
+.anniversary-copy h3,
+.anniversary-copy p,
+.selected-empty p {
+  margin: 0;
+}
+
+.anniversary-copy h3 {
+  overflow: hidden;
+  color: var(--color-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-body-md);
+  font-weight: 900;
+}
+
+.anniversary-copy p,
+.selected-empty {
+  color: var(--color-text-muted);
+  font-size: var(--text-body-sm);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.anniversary-more {
+  display: inline-flex;
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  color: var(--color-sage-700);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-pressed);
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.selected-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  align-items: end;
+  padding: var(--space-5) var(--space-5) calc(104px + env(safe-area-inset-bottom));
+  background: rgba(38, 44, 34, 0.28);
+}
+
+.action-sheet {
+  display: grid;
+  width: min(100%, 430px);
+  gap: var(--space-2);
+  justify-self: center;
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-float);
+}
+
+.action-sheet button {
+  min-height: 52px;
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  background: var(--color-surface-soft);
+  font-weight: 900;
+}
+
+.action-sheet .danger-action {
+  color: #8f554f;
+  background: rgba(239, 184, 170, 0.24);
 }
 
 .memory-list {
